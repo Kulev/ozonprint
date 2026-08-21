@@ -34,7 +34,7 @@ class CTk_DnD(ctk.CTk, TkinterDnD.DnDWrapper):
 class OzonLabelOptimizer(CTk_DnD):
     def __init__(self):
         super().__init__()
-        self.title("Ozon Print by Kulev")
+        self.title("Ozon Print PRO")
         self.geometry("450x850") 
         
         if not os.path.exists(APP_DATA_DIR):
@@ -246,11 +246,7 @@ class OzonLabelOptimizer(CTk_DnD):
             doc.close()
             
             # --- 1. ПОИСК ID ЗАКАЗА ---
-            
-            # Склеиваем тире между цифрами
             id_text = re.sub(r'(?<=\d)[\s\n]*([-–—−])[\s\n]*(?=\d)', r'\1', raw_text)
-            
-            
             id_text = re.sub(r'(?<=\d)[ \t]+(?=\d)', '', id_text)
             
             order_id, suf1, suf2 = "", "", ""
@@ -275,10 +271,10 @@ class OzonLabelOptimizer(CTk_DnD):
                         suf1 = m_suf2.group(1)
                         suf2 = m_suf2.group(2) if m_suf2.group(2) else ""
 
+            # Берём 15 символов с конца основного номера
             if order_id and len(order_id) > 15:
                 order_id = order_id[-15:]
 
-            # Формируем итоговую склейку ID
             if order_id and suf1:
                 formatted_id = f"{order_id}-\n{suf1}-{suf2}" if suf2 else f"{order_id}-\n{suf1}"
             elif order_id:
@@ -288,6 +284,7 @@ class OzonLabelOptimizer(CTk_DnD):
             else:
                 formatted_id = "Заказ"
 
+            # --- 2. ПОИСК ГОРОДА / СЦ ---
             city = ""
             lines = [t.strip() for t in raw_text.split('\n') if t.strip()]
             
@@ -353,6 +350,7 @@ class OzonLabelOptimizer(CTk_DnD):
                     id_text = parts[0]
                     city_text = parts[1] if len(parts) > 1 else ""
                     
+                    # Обрезка старых номеров на лету
                     if "-\n" in id_text:
                         id_lines = id_text.split('-\n')
                         if len(id_lines[0]) > 15 and id_lines[0].isdigit():
@@ -362,7 +360,6 @@ class OzonLabelOptimizer(CTk_DnD):
                         if len(id_text) > 15 and id_text.isdigit():
                             id_text = id_text[-15:]
                             
-                    # Отрисовка
                     if city_text:
                         self.canvas.create_text(
                             x1 + w/2, y1 + h/2 - 9, 
@@ -383,11 +380,12 @@ class OzonLabelOptimizer(CTk_DnD):
             self.canvas.create_line(0, cy, self.canvas_w, cy, fill="#cbd5e1", width=2, dash=(5, 5))
             self.canvas.create_line(cx, 0, cx, self.canvas_h, fill="#cbd5e1", width=2, dash=(5, 5))
 
+    # --- ЗАПОЛНЕНИЕ СНИЗУ ВВЕРХ И СПРАВА НАЛЕВО ---
     def get_free_slots(self, count):
         slots = []
         current_state = self.pages[self.current_page_idx]
         for r in range(ROWS - 1, -1, -1):
-            for c in range(COLS):
+            for c in range(COLS - 1, -1, -1):  # Начинаем с правой колонки!
                 if current_state[r][c]["s"] == 0:
                     slots.append((r, c))
                     if len(slots) == count: return slots
