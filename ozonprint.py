@@ -34,7 +34,7 @@ class CTk_DnD(ctk.CTk, TkinterDnD.DnDWrapper):
 class OzonLabelOptimizer(CTk_DnD):
     def __init__(self):
         super().__init__()
-        self.title("Ozon Print PRO - HP P1102 Edition")
+        self.title("Ozon Print A4 PRO")
         self.geometry("450x850") 
         
         if not os.path.exists(APP_DATA_DIR):
