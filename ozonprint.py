@@ -2,7 +2,7 @@ import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import pymupdf  
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import json
 import os
 import tempfile
@@ -34,7 +34,7 @@ class CTk_DnD(ctk.CTk, TkinterDnD.DnDWrapper):
 class OzonLabelOptimizer(CTk_DnD):
     def __init__(self):
         super().__init__()
-        self.title("Ozon Print PRO")
+        self.title("Ozon Print PRO - HP P1102 Edition")
         self.geometry("450x850") 
         
         if not os.path.exists(APP_DATA_DIR):
@@ -51,7 +51,7 @@ class OzonLabelOptimizer(CTk_DnD):
         self.top_frame.pack(pady=10, padx=20, fill="x")
         
         self.lbl_status = ctk.CTkLabel(
-            self.top_frame, text="Готово к работе. Добавляйте этикетки (можно перетащить файлы прямо в окно).", 
+            self.top_frame, text="Готово к работе. Добавляйте этикетки (можно перетащить файлы).", 
             font=ctk.CTkFont(family="Helvetica", size=13), 
             text_color="#334155", wraplength=380 
         )
@@ -59,7 +59,7 @@ class OzonLabelOptimizer(CTk_DnD):
 
         self.paper_mode_var = ctk.BooleanVar(value=True)
         self.switch_paper = ctk.CTkSwitch(
-            self.top_frame, text="Показывать линии разреза (крест)", 
+            self.top_frame, text="Показывать линии разреза", 
             variable=self.paper_mode_var, command=self.draw_grid, font=ctk.CTkFont(size=12),
             progress_color="#64748b"
         )
@@ -245,12 +245,10 @@ class OzonLabelOptimizer(CTk_DnD):
             raw_text = doc[0].get_text("text")
             doc.close()
             
-            # --- 1. ПОИСК ID ЗАКАЗА ---
             id_text = re.sub(r'(?<=\d)[\s\n]*([-–—−])[\s\n]*(?=\d)', r'\1', raw_text)
             id_text = re.sub(r'(?<=\d)[ \t]+(?=\d)', '', id_text)
             
             order_id, suf1, suf2 = "", "", ""
-            
             full_match = re.search(r'(\d{7,})[-–—−](\d{4})(?:[-–—−](\d{1,3}))?', id_text)
             
             if full_match:
@@ -271,28 +269,18 @@ class OzonLabelOptimizer(CTk_DnD):
                         suf1 = m_suf2.group(1)
                         suf2 = m_suf2.group(2) if m_suf2.group(2) else ""
 
-            # Берём 15 символов с конца основного номера
-            if order_id and len(order_id) > 15:
-                order_id = order_id[-15:]
+            if order_id and len(order_id) > 15: order_id = order_id[-15:]
+            if order_id and suf1: formatted_id = f"{order_id}-\n{suf1}-{suf2}" if suf2 else f"{order_id}-\n{suf1}"
+            elif order_id: formatted_id = order_id
+            elif suf1: formatted_id = f"Заказ-\n{suf1}-{suf2}" if suf2 else f"Заказ-\n{suf1}"
+            else: formatted_id = "Заказ"
 
-            if order_id and suf1:
-                formatted_id = f"{order_id}-\n{suf1}-{suf2}" if suf2 else f"{order_id}-\n{suf1}"
-            elif order_id:
-                formatted_id = order_id
-            elif suf1:
-                formatted_id = f"Заказ-\n{suf1}-{suf2}" if suf2 else f"Заказ-\n{suf1}"
-            else:
-                formatted_id = "Заказ"
-
-            # --- 2. ПОИСК ГОРОДА / СЦ ---
             city = ""
             lines = [t.strip() for t in raw_text.split('\n') if t.strip()]
-            
             for line in lines:
                 upper_line = line.upper()
                 if order_id and order_id in line: continue
                 if suf1 and suf1 in line: continue
-                
                 if any(keyword in upper_line for keyword in ["СЦ ", "РЦ ", "МК ", "СКЛАД ", "ЦО "]):
                     city = line
                     break
@@ -306,9 +294,7 @@ class OzonLabelOptimizer(CTk_DnD):
                         break
             
             clean_city = city[:25] if city else ""
-            
-            if clean_city:
-                return f"{formatted_id}\n\n{clean_city}"
+            if clean_city: return f"{formatted_id}\n\n{clean_city}"
             return formatted_id
             
         except Exception:
@@ -326,16 +312,34 @@ class OzonLabelOptimizer(CTk_DnD):
                 x1, y1 = c * w, r * h
                 x2, y2 = x1 + w, y1 + h
                 
-                cell = current_state[r][c]
-                val, text = cell["s"], cell["t"]
+                val = current_state[r][c]["s"]
+                text = current_state[r][c]["t"]
                 
-                if val == 0:
+                # Показываем крестик ТОЛЬКО если 3-й слот готовится к печати ПРЯМО СЕЙЧАС (s == 1)
+                is_current_pending_waste = (val == 0 and c == 0 and current_state[r][1]["s"] == 1)
+                
+                if val == 0 and not is_current_pending_waste:
+                    # Абсолютно пустая белая ячейка
                     bg, out, tc, fnt = "#ffffff", "#e2e8f0", "#94a3b8", ("Helvetica", 7)
                     self.canvas.create_rectangle(x1, y1, x2, y2, fill=bg, outline=out)
-                    self.canvas.create_text(
-                        x1 + w/2, y1 + h/2, 
-                        text=text, fill=tc, font=fnt, justify="center", width=wrap_width
-                    )
+                    self.canvas.create_text(x1 + w/2, y1 + h/2, text=text, fill=tc, font=fnt, justify="center", width=wrap_width)
+                
+                elif is_current_pending_waste:
+                    # Предупреждение о браке для ТЕКУЩЕЙ печати
+                    bg, out = "#f8fafc", "#e2e8f0"
+                    self.canvas.create_rectangle(x1, y1, x2, y2, fill=bg, outline=out)
+                    cx, cy = x1 + w/2, y1 + h/2
+                    cs = 12 
+                    self.canvas.create_line(cx - cs, cy - cs - 5, cx + cs, cy + cs - 5, fill="#94a3b8", width=2)
+                    self.canvas.create_line(cx - cs, cy + cs - 5, cx + cs, cy - cs - 5, fill="#94a3b8", width=2)
+                    self.canvas.create_text(cx, cy + 12, text="БРАК\n(В МУСОР)", fill="#94a3b8", font=("Helvetica", 6, "bold"), justify="center")
+
+                elif val in [3, 4]:
+                    # Ячейка УЖЕ была отрезана в прошлом, не привлекаем внимание
+                    bg, out, tc, fnt = "#f1f5f9", "#cbd5e1", "#94a3b8", ("Helvetica", 7)
+                    self.canvas.create_rectangle(x1, y1, x2, y2, fill=bg, outline=out)
+                    self.canvas.create_text(x1 + w/2, y1 + h/2, text="БРАК\n(ОТРЕЗАНО)", fill=tc, font=fnt, justify="center", width=wrap_width)
+
                 else:
                     if val == 1:
                         bg, out, tc_city, fnt = "#e0f2fe", "#7dd3fc", "#0369a1", ("Helvetica", 7, "bold")
@@ -350,7 +354,6 @@ class OzonLabelOptimizer(CTk_DnD):
                     id_text = parts[0]
                     city_text = parts[1] if len(parts) > 1 else ""
                     
-                    # Обрезка старых номеров на лету
                     if "-\n" in id_text:
                         id_lines = id_text.split('-\n')
                         if len(id_lines[0]) > 15 and id_lines[0].isdigit():
@@ -361,31 +364,22 @@ class OzonLabelOptimizer(CTk_DnD):
                             id_text = id_text[-15:]
                             
                     if city_text:
-                        self.canvas.create_text(
-                            x1 + w/2, y1 + h/2 - 9, 
-                            text=id_text, fill=tc_id, font=fnt, justify="center", width=wrap_width
-                        )
-                        self.canvas.create_text(
-                            x1 + w/2, y1 + h/2 + 15, 
-                            text=city_text, fill=tc_city, font=fnt, justify="center", width=wrap_width
-                        )
+                        self.canvas.create_text(x1 + w/2, y1 + h/2 - 9, text=id_text, fill=tc_id, font=fnt, justify="center", width=wrap_width)
+                        self.canvas.create_text(x1 + w/2, y1 + h/2 + 15, text=city_text, fill=tc_city, font=fnt, justify="center", width=wrap_width)
                     else:
-                        self.canvas.create_text(
-                            x1 + w/2, y1 + h/2, 
-                            text=id_text, fill=tc_id, font=fnt, justify="center", width=wrap_width
-                        )
-                    
+                        self.canvas.create_text(x1 + w/2, y1 + h/2, text=id_text, fill=tc_id, font=fnt, justify="center", width=wrap_width)
+
         if self.paper_mode_var.get():
             cx, cy = self.canvas_w / 2, self.canvas_h / 2
             self.canvas.create_line(0, cy, self.canvas_w, cy, fill="#cbd5e1", width=2, dash=(5, 5))
             self.canvas.create_line(cx, 0, cx, self.canvas_h, fill="#cbd5e1", width=2, dash=(5, 5))
 
-    # --- ЗАПОЛНЕНИЕ СНИЗУ ВВЕРХ И СПРАВА НАЛЕВО ---
     def get_free_slots(self, count):
         slots = []
         current_state = self.pages[self.current_page_idx]
-        for r in range(ROWS - 1, -1, -1):
-            for c in range(COLS - 1, -1, -1):  # Начинаем с правой колонки!
+        for r in range(ROWS - 1, -1, -1):        
+            for c in range(COLS - 1, -1, -1): 
+                # Ищем строго пустые слоты. Если слот был отбракован (val=4), он пропускается
                 if current_state[r][c]["s"] == 0:
                     slots.append((r, c))
                     if len(slots) == count: return slots
@@ -398,10 +392,8 @@ class OzonLabelOptimizer(CTk_DnD):
 
     def handle_drop_event(self, event):
         raw_data = event.data
-        if '{' in raw_data:
-            files = [x.strip('{}') for x in re.findall(r'{[^}]+}|[^\s{}]+', raw_data)]
-        else:
-            files = raw_data.split()
+        if '{' in raw_data: files = [x.strip('{}') for x in re.findall(r'{[^}]+}|[^\s{}]+', raw_data)]
+        else: files = raw_data.split()
             
         pdf_files = [f for f in files if f.lower().endswith('.pdf')]
         
@@ -444,9 +436,9 @@ class OzonLabelOptimizer(CTk_DnD):
                 pix = page.get_pixmap(matrix=pymupdf.Matrix(3, 3))
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                 
-                img.thumbnail((CELL_W - 40, CELL_H - 40), Image.Resampling.LANCZOS)
                 r, c = free_slots[i]
                 
+                img.thumbnail((CELL_W - 40, CELL_H - 40), Image.Resampling.LANCZOS)
                 paste_x = (c * CELL_W) + (CELL_W - img.width) // 2
                 paste_y = (r * CELL_H) + (CELL_H - img.height) // 2
                 
@@ -457,7 +449,7 @@ class OzonLabelOptimizer(CTk_DnD):
                     self.print_history.append(f_hash)
                     
                 doc.close()
-            
+
             self.save_page_image(self.current_page_idx)
             self.save_workbook()
             self.save_history() 
@@ -475,18 +467,40 @@ class OzonLabelOptimizer(CTk_DnD):
         current_state = self.pages[self.current_page_idx]
         
         has_new = False
+        draw = ImageDraw.Draw(print_image)
         
+        try:
+            font = ImageFont.truetype("arial.ttf", 26)
+        except:
+            font = ImageFont.load_default()
+
         for r in range(ROWS):
+            # Проверяем, печатается ли в этой строке 3-й слот (индекс 1) ПРЯМО СЕЙЧАС
+            is_row_active = (current_state[r][1]["s"] == 1)
+
             for c in range(COLS):
-                if current_state[r][c]["s"] == 1:
+                val = current_state[r][c]["s"]
+                left = c * CELL_W
+                top = r * CELL_H
+                right = left + CELL_W
+                bottom = top + CELL_H
+
+                # Крестик на PDF рисуется ТОЛЬКО для пустых 4-х слотов, если 3-й слот печатается СЕЙЧАС
+                is_current_pdf_waste = (c == 0 and val == 0 and is_row_active)
+
+                if val == 1:
                     has_new = True
-                    left = c * CELL_W
-                    top = r * CELL_H
-                    right = left + CELL_W
-                    bottom = top + CELL_H
-                    
                     cell_img = self.current_image.crop((left, top, right, bottom))
                     print_image.paste(cell_img, (left, top))
+                elif is_current_pdf_waste:
+                    # Маленький тонкий крестик (экономит порошок, не пачкает весь лист)
+                    cx = left + CELL_W // 2
+                    cy = top + CELL_H // 2
+                    cs = 50 
+                    
+                    draw.line([(cx - cs, cy - cs), (cx + cs, cy + cs)], fill="#94a3b8", width=4)
+                    draw.line([(cx - cs, cy + cs), (cx + cs, cy - cs)], fill="#94a3b8", width=4)
+                    draw.text((cx, cy + cs + 20), "БРАК", fill="#94a3b8", anchor="mm", font=font)
                     
         if not has_new:
             self.show_message("На этом листе нет новых этикеток для печати.", "error")
@@ -500,7 +514,12 @@ class OzonLabelOptimizer(CTk_DnD):
             try:
                 os.startfile(self.current_temp_pdf)
                 
+                # Обновляем статусы после успешной отправки
                 for r in range(ROWS):
+                    # Если мы только что отпечатали 3-й слот, а 4-й был пустым - убиваем 4-й слот навсегда
+                    if current_state[r][1]["s"] == 1 and current_state[r][0]["s"] == 0:
+                        current_state[r][0] = {"s": 4, "t": "БРАК\n(ОТРЕЗАНО)"}
+
                     for c in range(COLS):
                         if current_state[r][c]["s"] == 1:
                             current_state[r][c]["s"] = 2
