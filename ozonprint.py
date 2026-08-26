@@ -34,7 +34,7 @@ class CTk_DnD(ctk.CTk, TkinterDnD.DnDWrapper):
 class OzonLabelOptimizer(CTk_DnD):
     def __init__(self):
         super().__init__()
-        self.title("Ozon Print A4 PRO")
+        self.title("Ozon Print А4 PRO")
         self.geometry("450x850") 
         
         if not os.path.exists(APP_DATA_DIR):
@@ -315,17 +315,14 @@ class OzonLabelOptimizer(CTk_DnD):
                 val = current_state[r][c]["s"]
                 text = current_state[r][c]["t"]
                 
-                # Показываем крестик ТОЛЬКО если 3-й слот готовится к печати ПРЯМО СЕЙЧАС (s == 1)
                 is_current_pending_waste = (val == 0 and c == 0 and current_state[r][1]["s"] == 1)
                 
                 if val == 0 and not is_current_pending_waste:
-                    # Абсолютно пустая белая ячейка
                     bg, out, tc, fnt = "#ffffff", "#e2e8f0", "#94a3b8", ("Helvetica", 7)
                     self.canvas.create_rectangle(x1, y1, x2, y2, fill=bg, outline=out)
                     self.canvas.create_text(x1 + w/2, y1 + h/2, text=text, fill=tc, font=fnt, justify="center", width=wrap_width)
                 
                 elif is_current_pending_waste:
-                    # Предупреждение о браке для ТЕКУЩЕЙ печати
                     bg, out = "#f8fafc", "#e2e8f0"
                     self.canvas.create_rectangle(x1, y1, x2, y2, fill=bg, outline=out)
                     cx, cy = x1 + w/2, y1 + h/2
@@ -335,7 +332,6 @@ class OzonLabelOptimizer(CTk_DnD):
                     self.canvas.create_text(cx, cy + 12, text="БРАК\n(В МУСОР)", fill="#94a3b8", font=("Helvetica", 6, "bold"), justify="center")
 
                 elif val in [3, 4]:
-                    # Ячейка УЖЕ была отрезана в прошлом, не привлекаем внимание
                     bg, out, tc, fnt = "#f1f5f9", "#cbd5e1", "#94a3b8", ("Helvetica", 7)
                     self.canvas.create_rectangle(x1, y1, x2, y2, fill=bg, outline=out)
                     self.canvas.create_text(x1 + w/2, y1 + h/2, text="БРАК\n(ОТРЕЗАНО)", fill=tc, font=fnt, justify="center", width=wrap_width)
@@ -379,7 +375,6 @@ class OzonLabelOptimizer(CTk_DnD):
         current_state = self.pages[self.current_page_idx]
         for r in range(ROWS - 1, -1, -1):        
             for c in range(COLS - 1, -1, -1): 
-                # Ищем строго пустые слоты. Если слот был отбракован (val=4), он пропускается
                 if current_state[r][c]["s"] == 0:
                     slots.append((r, c))
                     if len(slots) == count: return slots
@@ -436,8 +431,10 @@ class OzonLabelOptimizer(CTk_DnD):
                 pix = page.get_pixmap(matrix=pymupdf.Matrix(3, 3))
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                 
-                r, c = free_slots[i]
                 
+                img = img.point(lambda p: 255 if p > 225 else p)
+                
+                r, c = free_slots[i]
                 img.thumbnail((CELL_W - 40, CELL_H - 40), Image.Resampling.LANCZOS)
                 paste_x = (c * CELL_W) + (CELL_W - img.width) // 2
                 paste_y = (r * CELL_H) + (CELL_H - img.height) // 2
@@ -463,6 +460,7 @@ class OzonLabelOptimizer(CTk_DnD):
             self.show_message(f"Сбой: {str(e)}", "error")
 
     def open_print_dialog(self):
+        # Создаем идеально белое полотно #FFFFFF
         print_image = Image.new('RGB', (A4_WIDTH, A4_HEIGHT), 'white')
         current_state = self.pages[self.current_page_idx]
         
@@ -475,7 +473,6 @@ class OzonLabelOptimizer(CTk_DnD):
             font = ImageFont.load_default()
 
         for r in range(ROWS):
-            # Проверяем, печатается ли в этой строке 3-й слот (индекс 1) ПРЯМО СЕЙЧАС
             is_row_active = (current_state[r][1]["s"] == 1)
 
             for c in range(COLS):
@@ -485,7 +482,6 @@ class OzonLabelOptimizer(CTk_DnD):
                 right = left + CELL_W
                 bottom = top + CELL_H
 
-                # Крестик на PDF рисуется ТОЛЬКО для пустых 4-х слотов, если 3-й слот печатается СЕЙЧАС
                 is_current_pdf_waste = (c == 0 and val == 0 and is_row_active)
 
                 if val == 1:
@@ -493,11 +489,9 @@ class OzonLabelOptimizer(CTk_DnD):
                     cell_img = self.current_image.crop((left, top, right, bottom))
                     print_image.paste(cell_img, (left, top))
                 elif is_current_pdf_waste:
-                    # Маленький тонкий крестик (экономит порошок, не пачкает весь лист)
                     cx = left + CELL_W // 2
                     cy = top + CELL_H // 2
                     cs = 50 
-                    
                     draw.line([(cx - cs, cy - cs), (cx + cs, cy + cs)], fill="#94a3b8", width=4)
                     draw.line([(cx - cs, cy + cs), (cx + cs, cy - cs)], fill="#94a3b8", width=4)
                     draw.text((cx, cy + cs + 20), "БРАК", fill="#94a3b8", anchor="mm", font=font)
@@ -508,15 +502,25 @@ class OzonLabelOptimizer(CTk_DnD):
             
         self.current_temp_pdf = os.path.join(tempfile.gettempdir(), f"ozon_print_page_{self.current_page_idx}.pdf")
         
-        print_image.save(self.current_temp_pdf, "PDF", resolution=300.0)
+        
+        temp_png = os.path.join(tempfile.gettempdir(), f"ozon_temp_print.png")
+        print_image.save(temp_png, "PNG")
+        
+        try:
+            pdf_doc = pymupdf.open()
+            rect = pymupdf.Rect(0, 0, *pymupdf.paper_size("a4"))
+            pdf_page = pdf_doc.new_page(width=rect.width, height=rect.height)
+            pdf_page.insert_image(rect, filename=temp_png)
+            pdf_doc.save(self.current_temp_pdf)
+            pdf_doc.close()
+        except Exception as e:
+            print_image.save(self.current_temp_pdf, "PDF", resolution=300.0)
         
         if os.path.exists(self.current_temp_pdf):
             try:
                 os.startfile(self.current_temp_pdf)
                 
-                # Обновляем статусы после успешной отправки
                 for r in range(ROWS):
-                    # Если мы только что отпечатали 3-й слот, а 4-й был пустым - убиваем 4-й слот навсегда
                     if current_state[r][1]["s"] == 1 and current_state[r][0]["s"] == 0:
                         current_state[r][0] = {"s": 4, "t": "БРАК\n(ОТРЕЗАНО)"}
 
